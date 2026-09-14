@@ -40,6 +40,21 @@ export const submissionRoutes = new Elysia({ tags: ['Submissions'] })
     },
   )
   .get(
+    '/tasks/:id/activity',
+    async ({ currentUser, params, query }) =>
+      service.listTaskActivity(
+        await resolveTaskId(params.id),
+        currentUser,
+        query.token,
+        resolvePagination(query),
+      ),
+    {
+      params: t.Object({ id: t.String() }),
+      query: t.Composite([paginationQuery, t.Object({ token: t.Optional(t.String()) })]),
+      detail: { summary: 'Feed aktivitas publik (siapa submit/dibayar, tanpa konten submission)' },
+    },
+  )
+  .get(
     '/submissions/mine',
     ({ user, query }) => service.listMySubmissions(user, resolvePagination(query)),
     { auth: true, query: paginationQuery, detail: { summary: 'Submission saya' } },

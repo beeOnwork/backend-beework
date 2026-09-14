@@ -100,6 +100,58 @@ export const listTaskSubmissions = async (
   return paginated(rows, totalRow?.value ?? 0, page)
 }
 
+/**
+ * Public, privacy-safe activity feed for a task's detail page: who submitted /
+ * got paid and when, without leaking submission content, links, or review notes.
+ */
+export const listTaskActivity = async (
+  taskId: string,
+  viewer: AuthUser | null,
+  privateToken: string | undefined,
+  page: Pagination,
+) => {
+  const [task] = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1)
+  if (!task) throw NotFound('Task')
+
+  const isOwner = viewer?.id === task.ownerId
+  const isStaff = viewer?.role === 'admin' || viewer?.role === 'moderator'
+  if (task.visibility === 'private' && !isOwner && !isStaff && task.privateToken !== privateToken)
+    throw Forbidden('This task is private')
+
+  const rows = await db
+    .select({
+      id: submissions.id,
+      status: submissions.status,
+      payoutAmount: submissions.payoutAmount,
+      createdAt: submissions.createdAt,
+      reviewedAt: submissions.reviewedAt,
+      username: users.username,
+      avatarUrl: users.avatarUrl,
+      isVerified: users.isVerified,
+    })
+    .from(submissions)
+    .innerJoin(users, eq(users.id, submissions.userId))
+    .where(eq(submissions.taskId, taskId))
+    .orderBy(desc(submissions.createdAt))
+    .limit(page.limit)
+    .offset(page.offset)
+
+  const [totalRow] = await db
+    .select({ value: count() })
+    .from(submissions)
+    .where(eq(submissions.taskId, taskId))
+
+  const items = rows.map((row) => ({
+    id: row.id,
+    kind: row.status === 'approved' ? ('paid' as const) : ('submission' as const),
+    user: { username: row.username, avatarUrl: row.avatarUrl, isVerified: row.isVerified },
+    amount: row.status === 'approved' ? row.payoutAmount : null,
+    occurredAt: (row.status === 'approved' ? row.reviewedAt : row.createdAt) ?? row.createdAt,
+  }))
+
+  return paginated(items, totalRow?.value ?? 0, page)
+}
+
 export const listMySubmissions = async (actor: AuthUser, page: Pagination) => {
   const rows = await db
     .select({
