@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { Elysia, t } from 'elysia'
 import { paginationQuery, resolvePagination } from '../../common/http.ts'
 import { db } from '../../db/index.ts'
@@ -50,7 +50,7 @@ export const notificationRoutes = new Elysia({ prefix: '/notifications', tags: [
           and(
             eq(notifications.userId, user.id),
             body.ids?.length
-              ? sql`${notifications.id} = any(${body.ids})`
+              ? inArray(notifications.id, body.ids)
               : isNull(notifications.readAt),
           ),
         )
