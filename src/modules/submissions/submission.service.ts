@@ -15,7 +15,7 @@ import {
   wallets,
 } from '../../db/schema/index.ts'
 import type { AuthUser } from '../../plugins/auth.ts'
-import { releaseEscrow } from '../../services/escrow.service.ts'
+import { refundEscrow, releaseEscrow } from '../../services/escrow.service.ts'
 import { awardOnchain, hashId } from '../../services/evm/escrow.contract.ts'
 import { assertEvmEnabled } from '../../services/onchain-escrow.service.ts'
 
@@ -235,6 +235,13 @@ export const approveSubmission = async (
       })
       .where(eq(tasks.id, task.id))
 
+    // All winner slots are filled but the payout(s) didn't use the whole budget
+    // (a partial/custom payoutAmount) — return the unallocated remainder to the
+    // owner now instead of stranding it in escrow forever.
+    if (isComplete && !fullyReleased) {
+      await refundEscrow(tx, task.id, actor.id)
+    }
+
     // Agregat pelaporan (sen USD) untuk profil, leaderboard, dan poin season.
     const [asset] = await tx
       .select({ decimals: assets.decimals, priceUsd: assets.priceUsd })
@@ -369,12 +376,24 @@ const approveOnchain = async (
       .onConflictDoNothing()
 
     const isComplete = fullyReleased || remainingSlots === 1
+    // On-chain, unallocated budget can't be pulled back immediately — the contract's
+    // refund() only accepts calls after `refundAt` (deadline + review period). Record
+    // the same hint `cancelTask` leaves, so the owner has a path to reclaim it later
+    // instead of it silently sitting in escrow with no record anyone should check.
     await tx
       .update(tasks)
       .set({
         winnersCount: sql`${tasks.winnersCount} + 1`,
         status: isComplete ? 'completed' : task.status,
         completedAt: isComplete ? new Date() : null,
+        metadata:
+          isComplete && !fullyReleased
+            ? {
+                ...(task.metadata ?? {}),
+                refundHint:
+                  'Panggil refund(' + escrow.onchainBountyId + ') di kontrak setelah ' + escrow.refundAt?.toISOString(),
+              }
+            : task.metadata,
       })
       .where(eq(tasks.id, task.id))
 
