@@ -75,6 +75,8 @@ const taskListColumns = {
   title: tasks.title,
   status: tasks.status,
   visibility: tasks.visibility,
+  categoryId: tasks.categoryId,
+  rewardAssetId: tasks.rewardAssetId,
   rewardAmount: tasks.rewardAmount,
   minimumPayout: tasks.minimumPayout,
   maxWinners: tasks.maxWinners,
