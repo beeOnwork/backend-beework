@@ -29,6 +29,13 @@
       "when": 1789152871516,
       "tag": "0003_evm_escrow",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789422357753,
+      "tag": "0004_dry_forge",
+      "breakpoints": true
     }
   ]
 }

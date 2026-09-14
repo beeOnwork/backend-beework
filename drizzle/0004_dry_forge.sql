@@ -1,0 +1,1 @@
+ALTER TABLE "tasks" ADD COLUMN "minimum_payout" numeric(38, 0);
