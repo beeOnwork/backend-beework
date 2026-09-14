@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>Beework — Uji Wallet On-chain</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root { font-family: system-ui, sans-serif; color-scheme: light dark; }
+  body { max-width: 900px; margin: 2rem auto; padding: 0 1rem; line-height: 1.45; }
+  h1 { font-size: 1.4rem; } h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
+  section { border: 1px solid #8884; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+  section.done { border-color: #2a4; } section.err { border-color: #c33; }
+  label { display: block; font-size: .85rem; margin-top: .5rem; }
+  input, select { width: 100%; padding: .4rem; font: inherit; box-sizing: border-box; }
+  button { padding: .45rem .9rem; font: inherit; cursor: pointer; margin: .5rem .3rem 0 0; }
+  button:disabled { opacity: .5; cursor: default; }
+  pre { background: #8881; padding: .6rem; overflow: auto; font-size: .8rem; max-height: 220px; white-space: pre-wrap; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+  .muted { opacity: .7; font-size: .85rem; }
+  .pill { display: inline-block; padding: .1rem .5rem; border-radius: 999px; background: #8882; font-size: .8rem; margin-left: .4rem; }
+</style>
+</head>
+<body>
+<h1>Beework — uji wallet on-chain, hulu ke hilir</h1>
+<p class="muted">Halaman ini hanya memanggil API publik dan MetaMask di browser Anda. Tidak ada kunci yang meninggalkan wallet.
+Butuh dua akun Beework: <b>owner</b> (yang membayar) dan <b>worker</b> (yang menerima). Keduanya boleh memakai wallet MetaMask yang sama untuk uji.</p>
+
+<section id="s0">
+  <h2>0. Koneksi <span class="pill" id="cfgState">belum</span></h2>
+  <label>API base URL <input id="api" value="https://api.eac01.xyz/api/v1"></label>
+  <button id="btnCfg">Baca /onchain/config</button>
+  <button id="btnMM">Hubungkan MetaMask + pindah chain</button>
+  <pre id="cfgOut">—</pre>
+</section>
+
+<section id="s1">
+  <h2>1. Akun <span class="pill">owner &amp; worker</span></h2>
+  <p class="muted">Belum punya akun? Isi username + email + password lalu <b>Daftar</b>. Sudah punya? Isi username/email + password lalu <b>Login</b>.</p>
+  <div class="row">
+    <div>
+      <label>Owner — username <input id="oUser" placeholder="mis. owner_uji"></label>
+      <label>Email (hanya untuk daftar) <input id="oEmail" placeholder="owner@contoh.com"></label>
+      <label>Password <input id="oPass" type="password"></label>
+      <button id="btnRegO">Daftar owner</button><button id="btnLoginO">Login owner</button>
+    </div>
+    <div>
+      <label>Worker — username <input id="wUser" placeholder="mis. worker_uji"></label>
+      <label>Email (hanya untuk daftar) <input id="wEmail" placeholder="worker@contoh.com"></label>
+      <label>Password <input id="wPass" type="password"></label>
+      <button id="btnRegW">Daftar worker</button><button id="btnLoginW">Login worker</button>
+    </div>
+  </div>
+  <p class="muted">Login Privy? Tempel <code>accessToken</code> Beework-nya langsung: <input id="tokenPaste" placeholder="accessToken…" style="width:60%"> <button id="btnTokO">→ owner</button> <button id="btnTokW">→ worker</button></p>
+  <pre id="loginOut">—</pre>
+</section>
+
+<section id="s2">
+  <h2>2. Tautkan wallet MetaMask ke akun <span class="pill">challenge → sign → verify</span></h2>
+  <button id="btnLinkO">Tautkan ke owner</button>
+  <button id="btnLinkW">Tautkan ke worker</button>
+  <pre id="linkOut">—</pre>
+</section>
+
+<section id="s3">
+  <h2>3. Owner: buat task &amp; danai (fund) <span class="pill">MON native</span></h2>
+  <div class="row">
+    <div><label>Judul <input id="title" value="Uji eskrow on-chain"></label></div>
+    <div><label>Reward (MON) <input id="reward" value="0.01"></label></div>
+  </div>
+  <button id="btnCreate">Buat task</button>
+  <button id="btnFund" disabled>fund() lewat MetaMask</button>
+  <button id="btnPublish" disabled>Publish dengan txHash</button>
+  <pre id="taskOut">—</pre>
+</section>
+
+<section id="s4">
+  <h2>4. Worker submit → owner approve <span class="pill">backend memanggil award()</span></h2>
+  <button id="btnSubmit" disabled>Worker: submit</button>
+  <button id="btnApprove" disabled>Owner: approve</button>
+  <pre id="subOut">—</pre>
+</section>
+
+<section id="s5">
+  <h2>5. Worker: tarik dana dari kontrak <span class="pill">withdraw()</span></h2>
+  <button id="btnClaimable" disabled>Cek claimable</button>
+  <button id="btnWithdraw" disabled>withdraw() lewat MetaMask</button>
+  <pre id="wdOut">—</pre>
+</section>
+
+<script type="module">
+import { createWalletClient, createPublicClient, custom, http, parseEther, formatEther, defineChain, getAddress } from 'https://esm.sh/viem@2.21.0'
+
+const $ = (id) => document.getElementById(id)
+const out = (id, v) => { $(id).textContent = typeof v === 'string' ? v : JSON.stringify(v, (_, x) => typeof x === 'bigint' ? x.toString() : x, 2) }
+const mark = (id, ok) => { $(id).classList.remove('done', 'err'); $(id).classList.add(ok ? 'done' : 'err') }
+
+const ABI = [
+  { type: 'function', name: 'fund', stateMutability: 'payable', inputs: [
+    { name: 'taskId', type: 'bytes32' }, { name: 'reviewer', type: 'address' }, { name: 'asset', type: 'address' },
+    { name: 'budget', type: 'uint256' }, { name: 'deadline', type: 'uint64' }, { name: 'maxWinners', type: 'uint32' } ], outputs: [{ type: 'bytes32' }] },
+  { type: 'function', name: 'withdraw', stateMutability: 'nonpayable', inputs: [{ name: 'asset', type: 'address' }, { name: 'recipient', type: 'address' }], outputs: [] },
+  { type: 'function', name: 'claimable', stateMutability: 'view', inputs: [{ type: 'address' }, { type: 'address' }], outputs: [{ type: 'uint256' }] },
+]
+
+const state = { cfg: null, chain: null, account: null, tokens: { owner: null, worker: null }, task: null, txHash: null, submissionId: null, mon: null, workerAddr: null }
+const api = async (path, { method = 'GET', body, who } = {}) => {
+  const res = await fetch($('api').value.replace(/\/$/, '') + path, {
+    method, headers: { 'content-type': 'application/json', ...(who ? { authorization: 'Bearer ' + state.tokens[who] } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  const json = await res.json().catch(() => null)
+  if (!res.ok) throw new Error(`${res.status} ${json?.error?.code ?? ''}: ${json?.error?.message ?? res.statusText}`)
+  return json
+}
+const guard = (id, fn) => async () => { try { await fn(); mark(id, true) } catch (e) { mark(id, false); out(id.replace('s', '') === '0' ? 'cfgOut' : ({ s1: 'loginOut', s2: 'linkOut', s3: 'taskOut', s4: 'subOut', s5: 'wdOut' })[id], 'ERROR: ' + e.message); console.error(e) } }
+
+// ── 0 ──
+$('btnCfg').onclick = guard('s0', async () => {
+  state.cfg = await api('/onchain/config')
+  const assets = await api('/assets')
+  state.mon = assets.find((a) => a.chain === 'monad' || a.chain === 'ethereum' || a.chain === 'base')
+  $('cfgState').textContent = state.cfg.enabled ? 'aktif' : 'NONAKTIF'
+  out('cfgOut', { ...state.cfg, asetEvmDiDb: state.mon ?? 'TIDAK ADA — insert ke tabel assets dulu' })
+  if (!state.cfg.enabled) throw new Error('EVM belum aktif di server: isi EVM_ESCROW_ADDRESS & EVM_REVIEWER_PRIVATE_KEY')
+  state.chain = defineChain({ id: state.cfg.chainId, name: state.cfg.chainName, nativeCurrency: { name: state.cfg.nativeSymbol, symbol: state.cfg.nativeSymbol, decimals: 18 }, rpcUrls: { default: { http: [] } } })
+})
+$('btnMM').onclick = guard('s0', async () => {
+  if (!window.ethereum) throw new Error('MetaMask tidak terdeteksi')
+  if (!state.cfg) throw new Error('baca config dulu')
+  const [acct] = await window.ethereum.request({ method: 'eth_requestAccounts' })
+  state.account = getAddress(acct)
+  const hex = '0x' + state.cfg.chainId.toString(16)
+  try { await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: hex }] }) }
+  catch (e) {
+    if (e.code !== 4902) throw e
+    const rpc = prompt('Chain belum ada di MetaMask. RPC URL:', 'https://testnet-rpc.monad.xyz')
+    await window.ethereum.request({ method: 'wallet_addEthereumChain', params: [{ chainId: hex, chainName: state.cfg.chainName, nativeCurrency: { name: state.cfg.nativeSymbol, symbol: state.cfg.nativeSymbol, decimals: 18 }, rpcUrls: [rpc] }] })
+  }
+  out('cfgOut', { account: state.account, chainId: state.cfg.chainId, contract: state.cfg.contractAddress, reviewer: state.cfg.reviewerAddress })
+})
+const wallet = () => createWalletClient({ account: state.account, chain: state.chain, transport: custom(window.ethereum) })
+const pub = () => createPublicClient({ chain: state.chain, transport: custom(window.ethereum) })
+
+// ── 1 ──
+const register = (who) => guard('s1', async () => {
+  const p = who === 'owner' ? { u: 'oUser', e: 'oEmail', pw: 'oPass' } : { u: 'wUser', e: 'wEmail', pw: 'wPass' }
+  const username = $(p.u).value.trim(), email = $(p.e).value.trim(), password = $(p.pw).value
+  if (!username || !email || password.length < 8) throw new Error('isi username, email, dan password (min 8 karakter)')
+  const cap = await api('/auth/captcha')
+  if (cap.enabled) throw new Error(`captcha aktif di server (${cap.provider}); daftar lewat frontend yang punya widget, lalu Login di sini`)
+  const r = await api('/auth/register', { method: 'POST', body: { username, email, password } })
+  state.tokens[who] = r.accessToken
+  out('loginOut', { [who]: 'terdaftar & login', username: r.user.username, referralCode: r.user.referralCode, owner: state.tokens.owner ? 'ok' : '-', worker: state.tokens.worker ? 'ok' : '-' })
+})
+$('btnRegO').onclick = register('owner'); $('btnRegW').onclick = register('worker')
+
+const login = (who) => guard('s1', async () => {
+  const r = await api('/auth/login', { method: 'POST', body: { identifier: $(who === 'owner' ? 'oUser' : 'wUser').value, password: $(who === 'owner' ? 'oPass' : 'wPass').value } })
+  state.tokens[who] = r.accessToken
+  out('loginOut', { owner: state.tokens.owner ? 'ok' : '-', worker: state.tokens.worker ? 'ok' : '-', terakhir: r.user.username })
+})
+$('btnLoginO').onclick = login('owner'); $('btnLoginW').onclick = login('worker')
+$('btnTokO').onclick = () => { state.tokens.owner = $('tokenPaste').value.trim(); out('loginOut', 'token owner diset') }
+$('btnTokW').onclick = () => { state.tokens.worker = $('tokenPaste').value.trim(); out('loginOut', 'token worker diset') }
+
+// ── 2 ──
+const link = (who) => guard('s2', async () => {
+  if (!state.account) throw new Error('hubungkan MetaMask dulu')
+  const chain = state.mon?.chain ?? 'monad'
+  const ch = await api('/users/me/wallets/challenge', { method: 'POST', who, body: { chain, address: state.account } })
+  const signature = await wallet().signMessage({ account: state.account, message: ch.message })
+  const w = await api('/users/me/wallets', { method: 'POST', who, body: { chain, address: state.account, nonce: ch.nonce, signature, isPrimary: true } })
+  if (who === 'worker') state.workerAddr = w.address
+  out('linkOut', { [who]: { address: w.address, verifiedAt: w.verifiedAt } })
+})
+$('btnLinkO').onclick = link('owner'); $('btnLinkW').onclick = link('worker')
+
+// ── 3 ──
+$('btnCreate').onclick = guard('s3', async () => {
+  if (!state.mon) throw new Error('aset EVM belum ada di DB')
+  const t = await api('/tasks', { method: 'POST', who: 'owner', body: {
+    type: 'task', title: $('title').value, description: 'Task uji alur eskrow on-chain dari halaman wallet-tester.',
+    rewardAssetId: state.mon.id, rewardAmount: parseEther($('reward').value).toString(),
+    deadlineAt: new Date(Date.now() + 2 * 3600_000).toISOString(),
+  } })
+  state.task = t
+  out('taskOut', { publicId: t.task.publicId, escrowMode: t.escrowMode, fee: formatEther(BigInt(t.fee)), deposit: formatEther(BigInt(t.onchain.deposit)), fundArgs: t.onchain.fundArgs })
+  $('btnFund').disabled = false
+})
+$('btnFund').onclick = guard('s3', async () => {
+  const fa = state.task.onchain.fundArgs
+  state.txHash = await wallet().writeContract({ address: state.cfg.contractAddress, abi: ABI, functionName: 'fund',
+    args: [fa.taskId, fa.reviewer, fa.asset, BigInt(fa.budget), BigInt(fa.deadline), fa.maxWinners], value: BigInt(state.task.onchain.deposit) })
+  out('taskOut', 'fund() terkirim: ' + state.txHash + '\nmenunggu konfirmasi…')
+  const rc = await pub().waitForTransactionReceipt({ hash: state.txHash })
+  out('taskOut', { txHash: state.txHash, status: rc.status, block: rc.blockNumber })
+  $('btnPublish').disabled = false
+})
+$('btnPublish').onclick = guard('s3', async () => {
+  const r = await api(`/tasks/${state.task.task.publicId}/publish`, { method: 'POST', who: 'owner', body: { txHash: state.txHash } })
+  const esc = await api(`/onchain/tasks/${state.task.task.publicId}`)
+  out('taskOut', { status: r.status, escrowDb: esc.db, kontrak: esc.onchain })
+  $('btnSubmit').disabled = false
+})
+
+// ── 4 ──
+$('btnSubmit').onclick = guard('s4', async () => {
+  const s = await api(`/tasks/${state.task.task.publicId}/submissions`, { method: 'POST', who: 'worker', body: { content: 'Hasil uji dari wallet-tester', links: ['https://example.com'] } })
+  state.submissionId = s.id
+  out('subOut', { submissionId: s.id, status: s.status })
+  $('btnApprove').disabled = false
+})
+$('btnApprove').onclick = guard('s4', async () => {
+  out('subOut', 'approve → backend mengirim award()… (menunggu receipt)')
+  const r = await api(`/submissions/${state.submissionId}/approve`, { method: 'POST', who: 'owner' })
+  out('subOut', r)
+  $('btnClaimable').disabled = false; $('btnWithdraw').disabled = false
+})
+
+// ── 5 ──
+$('btnClaimable').onclick = guard('s5', async () => {
+  const viaApi = await api('/onchain/claimable', { who: 'worker' })
+  const onchain = await pub().readContract({ address: state.cfg.contractAddress, abi: ABI, functionName: 'claimable', args: [state.cfg.nativeAsset, state.account] })
+  out('wdOut', { viaApi, kontrakUntukWalletIni: formatEther(onchain) + ' ' + state.cfg.nativeSymbol })
+})
+$('btnWithdraw').onclick = guard('s5', async () => {
+  const before = await pub().getBalance({ address: state.account })
+  const h = await wallet().writeContract({ address: state.cfg.contractAddress, abi: ABI, functionName: 'withdraw', args: [state.cfg.nativeAsset, state.account] })
+  const rc = await pub().waitForTransactionReceipt({ hash: h })
+  const after = await pub().getBalance({ address: state.account })
+  out('wdOut', { txHash: h, status: rc.status, saldoSebelum: formatEther(before), saldoSesudah: formatEther(after), catatan: 'selisih = reward − gas' })
+})
+</script>
+</body>
+</html>

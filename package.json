@@ -1,0 +1,39 @@
+{
+  "name": "beework",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "bun src/db/migrate.ts",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio",
+    "db:seed": "bun src/db/seed.ts",
+    "contracts:compile": "bun contracts/compile.ts",
+    "contracts:deploy": "bun contracts/deploy.ts",
+    "wallet-tester": "bun tools/serve-tester.ts"
+  },
+  "dependencies": {
+    "@elysiajs/bearer": "^1.4.4",
+    "@elysiajs/cors": "^1.4.2",
+    "@elysiajs/jwt": "^1.4.2",
+    "@elysiajs/swagger": "^1.3.1",
+    "@noble/curves": "^2.4.0",
+    "@scure/base": "^2.4.0",
+    "drizzle-orm": "^0.45.2",
+    "elysia": "^1.4.30",
+    "jose": "^6.2.12",
+    "postgres": "^3.4.9",
+    "viem": "^2.56.3"
+  },
+  "devDependencies": {
+    "@openzeppelin/contracts": "5",
+    "@types/bun": "^1.4.1",
+    "drizzle-kit": "^0.31.10",
+    "solc": "0.8.28",
+    "typescript": "5.9.3"
+  }
+}
